@@ -7,9 +7,6 @@ use glium::{glutin, Surface};
 mod support;
 
 fn main() {
-    println!("This example draws 10,000 instanced teapots. Each teapot gets a random position and \
-              direction at initialization. Then the CPU updates and uploads the positions of each \
-              teapot at each frame.");
 
     // building the display, ie. the main object
     let event_loop = glutin::event_loop::EventLoop::new();
@@ -22,14 +19,16 @@ fn main() {
     let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
 
     // list of cubes with position and direction
-    let mut i = 0.0;
-    let mut j = 0.0;
-    let mut k = 0.0;
+    let n = 10;
+    let mut c = 0;
     let mut cubes = (0 .. 100)
         .map(|_| {
-            let pos: (f32, f32, f32) = (i, j, k);
+            let mut k = (c/n*n) % n;
+            let mut j = (c/n) % n; 
+            let mut i = c % n;
+            let pos: (f32, f32, f32) = ((i as f32), (j as f32), (k as f32));
             let dir: (f32, f32, f32) = (1.0, 1.0, 1.0);
-            
+            c += 1; 
             (pos, dir)
         })
         .collect::<Vec<_>>();
@@ -56,19 +55,17 @@ fn main() {
         "
             #version 140
 
-            in vec3 position;
-            in vec3 normal;
-            in vec3 world_position;
-            out vec3 v_position;
-            out vec3 v_normal;
-            out vec3 v_color;
-
-            void main() {
-                v_position = position;
-                v_normal = normal;
-                v_color = vec3(float(gl_InstanceID) / 100.0, 1.0, 1.0);
-                gl_Position = vec4(position * 0.05 + world_position, 1.0);
-            }
+                uniform mat4 persp_matrix;
+                uniform mat4 view_matrix;
+                in vec3 position;
+                in vec3 normal;
+                out vec3 v_position;
+                out vec3 v_normal;
+                void main() {
+                    v_position = position;
+                    v_normal = normal;
+                    gl_Position = persp_matrix * view_matrix * vec4(v_position * 0.005, 1.0);
+                } 
         ",
         "
             #version 140
@@ -88,7 +85,7 @@ fn main() {
         None)
         .unwrap();
 
-    let camera = support::camera::CameraState::new();
+    let mut camera = support::camera::CameraState::new();
 
     // the main loop
     support::start_loop(event_loop, move |events| {
@@ -125,7 +122,7 @@ fn main() {
             match event {
                 glutin::event::Event::WindowEvent { event, .. } => match event {
                     glutin::event::WindowEvent::CloseRequested => action = support::Action::Stop,
-                    _ => (),
+                    ev => camera.process_input(&ev),
                 },
                 _ => (),
             }
