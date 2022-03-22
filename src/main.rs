@@ -1,133 +1,167 @@
 #[macro_use]
 extern crate glium;
 
-#[allow(unused_imports)]
-use glium::{glutin, Surface};
-
 mod support;
 
-fn main() {
+#[allow(unused_imports)]
+use glium::{glutin, Surface};
+use glium::index::PrimitiveType;
 
-    // building the display, ie. the main object
+fn main() {
     let event_loop = glutin::event_loop::EventLoop::new();
     let wb = glutin::window::WindowBuilder::new();
-    let cb = glutin::ContextBuilder::new().with_depth_buffer(24);
+    let cb = glutin::ContextBuilder::new();
     let display = glium::Display::new(wb, cb, &event_loop).unwrap();
 
-    // building the vertex and index buffers
-    let vertex_buffer = support::load_wavefront(&display, include_bytes!("support/cube.obj"));
-    let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
-
-    // list of cubes with position and direction
-    let n = 10;
-    let mut c = 0;
-    let mut cubes = (0 .. 100)
-        .map(|_| {
-            let mut k = (c/n*n) % n;
-            let mut j = (c/n) % n; 
-            let mut i = c % n;
-            let pos: (f32, f32, f32) = ((i as f32), (j as f32), (k as f32));
-            let dir: (f32, f32, f32) = (1.0, 1.0, 1.0);
-            c += 1; 
-            (pos, dir)
-        })
-        .collect::<Vec<_>>();
-
-    // building the vertex buffer with the attributes per instance
-    let mut per_instance = {
+    // building the vertex buffer, which contains all the vertices that we will draw
+    let vertex_buffer = {
         #[derive(Copy, Clone)]
-        struct Attr {
-            world_position: (f32, f32, f32),
+        struct Vertex {
+            position: [f32; 2],
+            color: [f32; 3],
         }
 
-        implement_vertex!(Attr, world_position);
+        implement_vertex!(Vertex, position, color);
 
-        let data = cubes.iter().map(|_| {
-            Attr {
-                world_position: (0.0, 0.0, 0.0),
-            }
-        }).collect::<Vec<_>>();
-
-        glium::vertex::VertexBuffer::dynamic(&display, &data).unwrap()
+        glium::VertexBuffer::new(&display,
+            &[
+                Vertex { position: [-0.5, -0.5], color: [0.0, 1.0, 0.0] },
+                Vertex { position: [ 0.0,  0.5], color: [0.0, 0.0, 1.0] },
+                Vertex { position: [ 0.5, -0.5], color: [1.0, 0.0, 0.0] },
+            ]
+        ).unwrap()
     };
 
-    let program = glium::Program::from_source(&display,
-        "
-            #version 140
+    // building the index buffer
+    let index_buffer = glium::IndexBuffer::new(&display, PrimitiveType::TrianglesList,
+                                               &[0u16, 1, 2]).unwrap();
 
-                uniform mat4 persp_matrix;
-                uniform mat4 view_matrix;
-                in vec3 position;
-                in vec3 normal;
-                out vec3 v_position;
-                out vec3 v_normal;
+    // compiling shaders and linking them together
+    let program = program!(&display,
+        140 => {
+            vertex: "
+                #version 140
+
+                uniform mat4 matrix;
+
+                in vec2 position;
+                in vec3 color;
+
+                out vec3 vColor;
+
                 void main() {
-                    v_position = position;
-                    v_normal = normal;
-                    gl_Position = persp_matrix * view_matrix * vec4(v_position * 0.005, 1.0);
-                } 
-        ",
-        "
-            #version 140
+                    gl_Position = vec4(position, 0.0, 1.0) * matrix;
+                    vColor = color;
+                }
+            ",
 
-            in vec3 v_normal;
-            in vec3 v_color;
-            out vec4 f_color;
+            fragment: "
+                #version 140
+                in vec3 vColor;
+                out vec4 f_color;
 
-            const vec3 LIGHT = vec3(-0.2, 0.8, 0.1);
+                void main() {
+                    f_color = vec4(vColor, 1.0);
+                }
+            "
+        },
 
-            void main() {
-                float lum = max(dot(normalize(v_normal), normalize(LIGHT)), 0.0);
-                vec3 color = (0.3 + 0.7 * lum) * v_color;
-                f_color = vec4(color, 1.0);
-            }
-        ",
-        None)
-        .unwrap();
+        110 => {
+            vertex: "
+                #version 110
 
-    let mut camera = support::camera::CameraState::new();
+                uniform mat4 matrix;
 
-    // the main loop
-    support::start_loop(event_loop, move |events| {
-        // updating the cubes
-        {
-            let mut mapping = per_instance.map();
-            for (src, dest) in cubes.iter_mut().zip(mapping.iter_mut()) {
+                attribute vec2 position;
+                attribute vec3 color;
 
-                dest.world_position = src.0;
-            }
-        }
+                varying vec3 vColor;
+
+                void main() {
+                    gl_Position = vec4(position, 0.0, 1.0) * matrix;
+                    vColor = color;
+                }
+            ",
+
+            fragment: "
+                #version 110
+                varying vec3 vColor;
+
+                void main() {
+                    gl_FragColor = vec4(vColor, 1.0);
+                }
+            ",
+        },
+
+        100 => {
+            vertex: "
+                #version 100
+
+                uniform lowp mat4 matrix;
+
+                attribute lowp vec2 position;
+                attribute lowp vec3 color;
+
+                varying lowp vec3 vColor;
+
+                void main() {
+                    gl_Position = vec4(position, 0.0, 1.0) * matrix;
+                    vColor = color;
+                }
+            ",
+
+            fragment: "
+                #version 100
+                varying lowp vec3 vColor;
+
+                void main() {
+                    gl_FragColor = vec4(vColor, 1.0);
+                }
+            ",
+        },
+    ).unwrap();
+
+    // Here we draw the black background and triangle to the screen using the previously
+    // initialised resources.
+    //
+    // In this case we use a closure for simplicity, however keep in mind that most serious
+    // applications should probably use a function that takes the resources as an argument.
+    let draw = move || {
+        // building the uniforms
+        let uniforms = uniform! {
+            matrix: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0f32]
+            ]
+        };
 
         // drawing a frame
-        let params = glium::DrawParameters {
-            depth: glium::Depth {
-                test: glium::DepthTest::IfLess,
-                write: true,
-                .. Default::default()
-            },
-            .. Default::default()
-        };
-
         let mut target = display.draw();
-        target.clear_color_and_depth((0.0, 0.0, 0.0, 0.0), 1.0);
-        target.draw((&vertex_buffer, per_instance.per_instance().unwrap()),
-                    &indices, &program, &uniform! { matrix: camera.get_perspective() },
-                    &params).unwrap();
+        target.clear_color(0.0, 0.0, 0.0, 0.0);
+        target.draw(&vertex_buffer, &index_buffer, &program, &uniforms, &Default::default()).unwrap();
         target.finish().unwrap();
+    };
 
-        let mut action = support::Action::Continue;
+    // Draw the triangle to the screen.
+    draw();
 
-        // polling and handling the events received by the window
-        for event in events {
-            match event {
-                glutin::event::Event::WindowEvent { event, .. } => match event {
-                    glutin::event::WindowEvent::CloseRequested => action = support::Action::Stop,
-                    ev => camera.process_input(&ev),
+    // the main loop
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = match event {
+            glutin::event::Event::WindowEvent { event, .. } => match event {
+                // Break from the main loop when the window is closed.
+                glutin::event::WindowEvent::CloseRequested => glutin::event_loop::ControlFlow::Exit,
+                // Redraw the triangle when the window is resized.
+                glutin::event::WindowEvent::Resized(..) => {
+                    draw();
+                    glutin::event_loop::ControlFlow::Poll
                 },
-                _ => (),
-            }
+                _ => glutin::event_loop::ControlFlow::Poll,
+            },
+            _ => glutin::event_loop::ControlFlow::Poll,
         };
-
-        action
     });
 }
+
