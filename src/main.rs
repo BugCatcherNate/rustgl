@@ -1,11 +1,12 @@
 #[macro_use]
 extern crate glium;
 
-mod support;
 
 #[allow(unused_imports)]
 use glium::{glutin, Surface};
 use glium::index::PrimitiveType;
+use std::fs::File;
+use std::io::Read;
 
 fn main() {
     let event_loop = glutin::event_loop::EventLoop::new();
@@ -35,26 +36,10 @@ fn main() {
     // building the index buffer
     let index_buffer = glium::IndexBuffer::new(&display, PrimitiveType::TrianglesList,
                                                &[0u16, 1, 2]).unwrap();
-
     // compiling shaders and linking them together
     let program = program!(&display,
         140 => {
-            vertex: "
-                #version 140
-
-                uniform mat4 matrix;
-
-                in vec2 position;
-                in vec3 color;
-
-                out vec3 vColor;
-
-                void main() {
-                    gl_Position = vec4(position, 0.0, 1.0) * matrix;
-                    vColor = color;
-                }
-            ",
-
+            vertex: &load_shader("src/support/vertex.txt"),
             fragment: "
                 #version 140
                 in vec3 vColor;
@@ -163,5 +148,26 @@ fn main() {
             _ => glutin::event_loop::ControlFlow::Poll,
         };
     });
+}
+
+fn load_shader(filename:&str) -> String {
+
+  let mut content = String::new();
+    // Open the file in read-only mode.
+    match File::open(filename) {
+        // The file is open (no error).
+        Ok(mut file) => {
+
+            // Read all the file content into a variable (ignoring the result of the operation).
+            file.read_to_string(&mut content).unwrap();
+
+            // The file is automatically closed when is goes out of scope.
+        },
+        // Error handling.
+        Err(error) => {
+            println!("Error opening file {}: {}", filename, error);
+        },
+    }
+	content
 }
 
